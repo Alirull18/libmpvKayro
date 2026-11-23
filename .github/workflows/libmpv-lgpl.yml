@@ -11,6 +11,15 @@ on:
         description: "shinchiro/mpv-winbuild-cmake commit or branch (blank = default branch; the exact commit is always recorded)"
         required: false
         default: "bda10a2816ce9908d419b3f4b564227330457e76"
+      sources_cutoff:
+        description: "Build every source as of this date (ISO 8601). Blank = the toolchain commit's date, so its patches apply"
+        required: false
+        default: ""
+      accept_lgplv3:
+        description: "The owner accepts an LGPLv3 FFmpeg (decisions D14/D36). Without it the build is kept but not published"
+        required: false
+        default: false
+        type: boolean
       clean_cache:
         description: "Start from nothing: do not restore the saved build state"
         required: false
@@ -81,7 +90,17 @@ jobs:
       - name: Build
         shell: bash
         run: |
+          set -o pipefail
+          # The whole job output goes into the build-logs artifact, not just the per-package logs.
+          mkdir -p logs
+          exec > >(tee -a logs/build-full.log) 2>&1
           chmod +x build.sh
+          cutoff="${{ inputs.sources_cutoff }}"
+          [ -n "$cutoff" ] || cutoff=$(git -C mpv-winbuild-cmake log -1 --format=%cI)
+          echo "SOURCES_CUTOFF=$cutoff" | tee -a "$GITHUB_ENV"
+          export SOURCES_CUTOFF="$cutoff"
+          # A committed sources.lock (a previous release's SOURCES.txt) pins those trees exactly.
+          if [ -f sources.lock ]; then export SOURCES_LOCK="$PWD/sources.lock"; fi
           cd mpv-winbuild-cmake
           for patch in ../patch/*.patch ; do
             git am --3way "$patch" || git am --abort
@@ -116,19 +135,24 @@ jobs:
           mkdir -p /tmp/check && 7z x -y -o/tmp/check "$pkg" >/dev/null
           dll=$(find /tmp/check -name 'libmpv-2.dll' | head -n1)
           test -n "$dll"
-          # FFmpeg stores its configure line inside the library. Record it, and fail on GPL or non-free.
-          cfg=$(grep -a -o -- '--[a-z0-9_-]*\(=[^ ]*\)\?' "$dll" | sort -u || true)
-          printf '%s\n' "$cfg" > ../out/ffmpeg-configure-flags.txt
-          if grep -q -e '^--enable-gpl$' -e '^--enable-nonfree$' ../out/ffmpeg-configure-flags.txt; then
-            echo "::error::The build contains --enable-gpl or --enable-nonfree; this is not an LGPL build"
-            exit 1
-          fi
+          # Judged from FFmpeg's own configure command and licence line in the build tree; fails if they are missing.
+          bash ../scripts/check-licence.sh build64 "$dll" ../out "${{ inputs.accept_lgplv3 }}"
+          (cd /tmp/check && find . -type f -print0 | sort -z | xargs -0 sha256sum) > ../out/PACKAGE-CONTENTS.sha256
+          pacman -Q > ../out/host-packages.txt
           {
             echo "built_at_utc=$(date -u +%FT%TZ)"
             echo "workflow_run=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo "build_scripts_commit=${GITHUB_SHA}"
             echo "toolchain_repo=https://github.com/shinchiro/mpv-winbuild-cmake"
             echo "toolchain_commit=$(git rev-parse HEAD)"
+            echo "sources_cutoff=${SOURCES_CUTOFF}"
+            echo "sources_lock=$([ -f ../sources.lock ] && sha256sum ../sources.lock | cut -d' ' -f1 || echo none)"
+            echo "ffmpeg_license=$(cut -d: -f2- ../out/ffmpeg-license.txt | xargs)"
+            echo "licence_status=$(cat ../out/licence-status.txt)"
+            echo "container_image=ghcr.io/archlinux/archlinux:base-devel (host package versions in host-packages.txt)"
+            echo "host_gcc=$(gcc --version | head -n1)"
+            echo "cross_gcc=$(find build64/install/bin -name '*-w64-mingw32-gcc' -print -quit | xargs -r -I{} {} --version | head -n1)"
+            echo "rustc=$(install_rustup/.cargo/bin/rustc --version 2>/dev/null || echo unknown)"
             echo "mpv_commit=$(git -C src_packages/mpv rev-parse HEAD)"
             echo "ffmpeg_commit=$(git -C src_packages/ffmpeg rev-parse HEAD)"
             echo "package=$(basename "$pkg")"
@@ -142,6 +166,7 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/archive-sources.sh mpv-winbuild-cmake/src_packages out
+          bash scripts/collect-licenses.sh mpv-winbuild-cmake/src_packages out
 
       - uses: actions/upload-artifact@v4
         with:
@@ -154,6 +179,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p logs
+          # logs/build-full.log is already here; add every package log and FFmpeg's config.log.
           find mpv-winbuild-cmake/build64 -type f \( -iname '*-*.log' -o -wholename '*/ffbuild/config.log' \) -print0 2>/dev/null | xargs -0 -r 7z a logs/logs.7z >/dev/null || true
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
@@ -181,8 +207,13 @@ jobs:
         run: |
           set -euo pipefail
           cd out
+          if [ "$(cat licence-status.txt)" = lgplv3-not-accepted ]; then
+            echo "::error::FFmpeg is LGPLv3 and accept_lgplv3 was not ticked (owner decisions D14/D36). Not publishing."
+            exit 1
+          fi
           mpv_sha=$(grep '^mpv_commit=' BUILD-INFO.txt | cut -d= -f2 | cut -c1-10)
-          tag="libmpv-lgpl-$(date -u +%Y-%m-%d)-${mpv_sha}"
+          # The run id keeps every rebuild on a new tag; an existing release is never replaced.
+          tag="libmpv-lgpl-$(date -u +%Y-%m-%d)-${mpv_sha}-r${GITHUB_RUN_ID}"
           sha256sum * > SHA256SUMS.txt
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "libmpv LGPL $tag" \
             --notes-file BUILD-INFO.txt ./*

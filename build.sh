@@ -74,7 +74,9 @@ build() {
         ninja -C $buildroot/build$bit rustup-fullclean
         ninja -C $buildroot/build$bit rustup
     fi
-    ninja -C $buildroot/build$bit update
+    # `ninja update` would move every source to its newest upstream commit, so a toolchain patch written for
+    # an older commit stops applying and no two runs build the same sources. Pin them instead.
+    bash $gitdir/../scripts/pin-sources.sh "$srcdir" "${SOURCES_CUTOFF:?SOURCES_CUTOFF is required}" "${SOURCES_LOCK:-}" || exit 1
     ninja -C $buildroot/build$bit mpv-fullclean
     
     # -k 0 keeps going past a failed package so one run lists every package that fails (debugging aid).
