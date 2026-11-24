@@ -7,7 +7,7 @@ Builds `libmpv-2.dll` for 64-bit Windows with GitHub Actions, for use by KayroTv
 `.github/workflows/libmpv-lgpl.yml` (manual run only):
 
 1. Checks out [shinchiro/mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake), the build system for mpv and its libraries, at the commit you give (blank = latest).
-2. Applies `compile-lgpl-libmpv.patch`, which disables the GPL-only and non-free parts of FFmpeg and mpv, and `patch/*.patch`.
+2. Applies `patch/*.patch`, then `compile-lgpl-libmpv.patch`, which disables the GPL-only and non-free parts of FFmpeg and mpv, then `patch-after-lgpl/*.patch` (local fixes and the slim build, see below).
 3. Pins every source tree (`scripts/pin-sources.sh`): the commit named in `sources.lock` if that file exists, otherwise the last commit at or before the *sources_cutoff* date, which defaults to the toolchain commit's date so the toolchain's own patches apply. `build.sh` no longer runs `ninja update`, which moved every library to its newest commit.
 4. Builds with `build.sh` (GCC toolchain, x86_64, libmpv only). The whole job output is kept as `build-full.log` in the `build-logs` artifact, next to every package log.
 5. **Checks the licence from the build tree** (`scripts/check-licence.sh`): FFmpeg's configure command and the `License:` line its configure printed. It fails on `--enable-gpl`, `--enable-nonfree` or a non-LGPL licence, and it fails when that evidence is missing, so it cannot pass by finding nothing. An LGPLv3 FFmpeg is recorded as `lgplv3-not-accepted` unless *accept_lgplv3* is ticked.
@@ -17,6 +17,16 @@ Builds `libmpv-2.dll` for 64-bit Windows with GitHub Actions, for use by KayroTv
 ## How to run it
 
 Actions tab, **libmpv-lgpl**, **Run workflow**. Leave *sources_cutoff* blank unless you change *toolchain_ref*. Tick *accept_lgplv3* only once the owner has accepted an LGPLv3 FFmpeg, and *publish* to create a release. A cold build downloads and compiles the GCC toolchain and about sixty libraries, so expect it to take hours; the job limit is six hours.
+
+## Slim build for KayroTV
+
+`patch-after-lgpl/0004-slim-libmpv-for-kayrotv.patch` trims the DLL to what KayroTV uses (`MpvHost.cs` embeds mpv with `wid`, default `gpu-next` on d3d11, `config=no`, `load-scripts=no`, `ytdl=no`, `osc=no`). The job log, the step summary and `BUILD-INFO.txt` report the size of `libmpv-2.dll`.
+
+- **Removed:** the AV1 encoders (aom, SVT-AV1; dav1d still decodes), lame, libwebp, libvpx, opus, vorbis and speex (FFmpeg decodes VP8/VP9/Opus/Vorbis natively; speex is obsolete), vapoursynth, libjxl, libopenmpt, libmodplug, libaribcaption, libmysofa, libbs2b, libbluray, uavs3d, OpenAL, lcms2 in FFmpeg and mpv, OpenSSL and libssh. In mpv: Lua and JavaScript (luajit, mujs), SDL2 gamepad, libarchive, uchardet, vapoursynth. FFmpeg encoders are limited to `png` and `mjpeg` (screenshots), and muxers, devices and programs are disabled.
+- **Kept:** every FFmpeg decoder, demuxer, parser, bitstream filter, filter and protocol (restricting them is too risky), libplacebo/shaderc/spirv-cross/Vulkan headers, d3d11va, dxva2, NVDEC/CUVID and AMF headers, dav1d, libass with freetype, fribidi, harfbuzz and fontconfig, libxml2 (DASH), zimg, libsoxr, libpng and libjpeg, libva (left in as a precaution; its role in this mingw build was not verified) and libcurl.
+- **TLS uses Windows SChannel**, in FFmpeg (`--enable-schannel`) and in curl, so OpenSSL is no longer built or linked. FFmpeg's `tls-ca-file` option no longer has any effect; the system certificate store is used. KayroTV sets `tls-ca-file` only in debug builds.
+
+After every build, test the channels before shipping: HLS, DASH (including ClearKey), MPEG-TS, HTTPS (several CDNs, TLS 1.2 and 1.3), RTMP, subtitles (SRT, ASS, WebVTT), screenshots, and the audio filters (acompressor, equalizer, dynaudnorm, bass, treble) and `deinterlace=auto`.
 
 ## Licence position (read this before shipping)
 

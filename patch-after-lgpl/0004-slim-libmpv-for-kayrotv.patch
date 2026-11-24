@@ -1,0 +1,218 @@
+From cb32b53b045848142905146f3dbb84c101b8dcbf Mon Sep 17 00:00:00 2001
+From: KayroTV <noreply@kayrotv.invalid>
+Date: Tue, 24 Nov 2026 18:43:28 +0000
+Subject: [PATCH] packages: slim libmpv for KayroTV and use SChannel for TLS
+
+TLS: FFmpeg now uses Windows SChannel (--enable-schannel) instead of
+OpenSSL. curl (pulled in by mpv's libcurl) is switched to SChannel too and
+built without libssh, so OpenSSL is no longer built or linked into libmpv.
+
+Removed from FFmpeg (dependency and configure flag): aom, svtav1, lame,
+libwebp, libvpx, opus, vorbis, speex (FFmpeg decodes vp8/vp9/opus/vorbis
+natively), vapoursynth, libjxl, libopenmpt, libmodplug, libaribcaption,
+libmysofa, libbs2b, libbluray, uavs3d, lcms2, openal-soft, openssl.
+Encoders are limited to png and mjpeg (screenshots), and muxers, devices,
+programs and docs are disabled. Decoders, demuxers, parsers, filters and
+protocols are untouched.
+
+Removed from mpv (dependency and meson option): lua, javascript (luajit,
+mujs), sdl2 gamepad, libarchive, libbluray, uchardet, lcms2, vapoursynth.
+---
+ packages/curl.cmake   | 10 ++++-----
+ packages/ffmpeg.cmake | 52 ++++++-------------------------------------
+ packages/mpv.cmake    | 23 +++++++------------
+ 3 files changed, 19 insertions(+), 66 deletions(-)
+
+diff --git a/packages/curl.cmake b/packages/curl.cmake
+index 986626d..8e3cc2f 100644
+--- a/packages/curl.cmake
++++ b/packages/curl.cmake
+@@ -3,9 +3,7 @@ ExternalProject_Add(curl
+         brotli
+         c-ares
+         libpsl
+-        libssh
+         nghttp2
+-        openssl
+         zlib
+         zstd
+     GIT_REPOSITORY https://github.com/curl/curl.git
+@@ -26,12 +24,12 @@ ExternalProject_Add(curl
+         -DBUILD_LIBCURL_DOCS=OFF
+         -DBUILD_EXAMPLES=OFF
+         -DBUILD_MISC_DOCS=OFF
+-        -DCURL_CA_NATIVE=ON
+         -DCURL_BROTLI=ON
+         -DCURL_USE_LIBPSL=ON
+-        -DCURL_USE_LIBSSH=ON
++        -DCURL_USE_LIBSSH=OFF
+         -DCURL_USE_LIBSSH2=OFF
+-        -DCURL_USE_OPENSSL=ON
++        -DCURL_USE_OPENSSL=OFF
++        -DCURL_USE_SCHANNEL=ON
+         -DCURL_ZSTD=ON
+         -DENABLE_ARES=ON
+         -DENABLE_CURL_MANUAL=OFF
+@@ -42,7 +40,7 @@ ExternalProject_Add(curl
+         -DUSE_NGTCP2=OFF
+         -DUSE_WIN32_IDN=ON
+         -DUSE_WINDOWS_SSPI=ON
+-        -DUSE_ECH=ON
++        -DUSE_ECH=OFF
+         -DUSE_HTTPSRR=ON
+         -DUSE_SSLS_EXPORT=ON
+         -DUSE_PROXY_HTTP3=OFF
+diff --git a/packages/ffmpeg.cmake b/packages/ffmpeg.cmake
+index a66b315..aeaabf0 100644
+--- a/packages/ffmpeg.cmake
++++ b/packages/ffmpeg.cmake
+@@ -3,36 +3,16 @@ ExternalProject_Add(ffmpeg
+         amf-headers
+         nvcodec-headers
+         bzip2
+-        lame
+-        lcms2
+-        openssl
+         libass
+-        libbluray
+-        libmodplug
+         libpng
+         libsoxr
+-        libbs2b
+-        libvpx
+-        libwebp
+         libzimg
+-        libmysofa
+         fontconfig
+         harfbuzz
+-        opus
+-        speex
+-        vorbis
+         libxml2
+-        libopenmpt
+-        libjxl
+         libplacebo
+-        libaribcaption
+-        aom
+-        svtav1
+         dav1d
+-        vapoursynth
+-        ${ffmpeg_uavs3d}
+         libva
+-        openal-soft
+     GIT_REPOSITORY https://github.com/FFmpeg/FFmpeg.git
+     SOURCE_DIR ${SOURCE_LOCATION}
+     GIT_CLONE_FLAGS "--sparse --filter=tree:0"
+@@ -47,48 +27,30 @@ ExternalProject_Add(ffmpeg
+         --enable-cross-compile
+         --enable-runtime-cpudetect
+         --enable-version3
+-        --enable-vapoursynth
+         --enable-libass
+-        --enable-libbluray
+         --enable-libfreetype
+         --enable-libfribidi
+         --enable-libfontconfig
+         --enable-libharfbuzz
+-        --enable-libmodplug
+-        --enable-libopenmpt
+-        --enable-libmp3lame
+-        --enable-lcms2
+-        --enable-libopus
+         --enable-libsoxr
+-        --enable-libspeex
+-        --enable-libvorbis
+-        --enable-libbs2b
+-        --enable-libvpx
+-        --enable-libwebp
+-        --enable-libaom
+-        --enable-libsvtav1
+         --enable-libdav1d
+-        ${ffmpeg_uavs3d_cmd}
+         --enable-libzimg
+-        --enable-openssl
+         --enable-libxml2
+-        --enable-libmysofa
+-        --enable-libjxl
++        --enable-schannel
++        --disable-encoders
++        --enable-encoder=png,mjpeg
++        --disable-muxers
++        --disable-devices
++        --disable-programs
++        --disable-doc
+         --enable-libplacebo
+-        --enable-libaribcaption
+         --enable-cuda-llvm
+         --enable-cuvid
+         --enable-nvdec
+-        --enable-nvenc
+         --enable-amf
+-        --enable-openal
+-        --disable-doc
+-        --disable-ffplay
+-        --disable-ffprobe
+         --enable-vaapi
+         --disable-vdpau
+         --disable-videotoolbox
+-        --disable-decoder=libaom_av1
+         ${ffmpeg_lto}
+         --extra-cflags='-Wno-error=int-conversion'
+         "--extra-libs='${ffmpeg_extra_libs}'" # -lstdc++ / -lc++ needs by libjxl and shaderc
+diff --git a/packages/mpv.cmake b/packages/mpv.cmake
+index a7e44de..05881e0 100644
+--- a/packages/mpv.cmake
++++ b/packages/mpv.cmake
+@@ -3,21 +3,14 @@ ExternalProject_Add(mpv
+         angle-headers
+         ffmpeg
+         fribidi
+-        lcms2
+-        libarchive
+         libass
+         libiconv
+         libjpeg
+         libpng
+-        luajit
+-        uchardet
+-        mujs
+         vulkan
+         shaderc
+         libplacebo
+         spirv-cross
+-        vapoursynth
+-        libsdl2
+         subrandr
+         libsixel
+         curl
+@@ -40,19 +33,19 @@ ExternalProject_Add(mpv
+         -Dcplayer=false
+         -Dlibmpv=true
+         -Dpdf-build=disabled
+-        -Dlua=enabled
+-        -Djavascript=enabled
+-        -Dsdl2-gamepad=enabled
+-        -Dlibarchive=enabled
+-        -Dlibbluray=enabled
++        -Dlua=disabled
++        -Djavascript=disabled
++        -Dsdl2-gamepad=disabled
++        -Dlibarchive=disabled
++        -Dlibbluray=disabled
+         -Ddvdnav=disabled
+-        -Duchardet=enabled
++        -Duchardet=disabled
+         -Drubberband=disabled
+-        -Dlcms2=enabled
++        -Dlcms2=disabled
+         -Dopenal=disabled
+         -Dspirv-cross=enabled
+         -Dvulkan=enabled
+-        -Dvapoursynth=enabled
++        -Dvapoursynth=disabled
+         -Dsubrandr=enabled
+         -Dsixel=enabled
+         ${mpv_gl}
+-- 
+2.43.0
+
