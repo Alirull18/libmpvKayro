@@ -4,9 +4,10 @@
 # Usage: pin-sources.sh <src_packages directory> <cutoff date> [lock file]
 #
 # For each tree that tracks an upstream branch, the commit is taken from the lock file when it names the
-# tree, otherwise it is the last first-parent commit on that branch at or before the cutoff date (default:
-# the toolchain commit's date, so upstream sources match the toolchain's own patches). A tree pinned by
-# the toolchain to a fixed commit has no upstream branch and is left as it is.
+# tree, else from GIT_RESET in packages/<name>.cmake when the toolchain pins it there, otherwise it is the
+# last first-parent commit on that branch at or before the cutoff date (default: the toolchain commit's
+# date, so upstream sources match the toolchain's own patches). A tree pinned via GIT_TAG has no upstream
+# branch and is left as it is.
 #
 # The toolchain's clean steps hard-reset each tree to its upstream ref (@{u}), so the pin moves that
 # remote-tracking ref as well as HEAD; a later fullclean then lands on the pin, not on the newest commit.
@@ -43,9 +44,14 @@ for d in "$src"/*/; do
   if [ "$(git -C "$d" rev-parse --is-shallow-repository)" = true ]; then
     git -C "$d" fetch --unshallow --filter=tree:0 --no-recurse-submodules
   fi
-  if [ -n "${locked[$name]:-}" ]; then
-    target=${locked[$name]}
+  pkg_cmake="$(dirname "$src")/packages/$name.cmake"
+  target=${locked[$name]:-}
+  if [ -z "$target" ] && [ -f "$pkg_cmake" ]; then
+    target=$(sed -nE 's/^[[:space:]]*GIT_RESET[[:space:]]+([^[:space:]#)]+).*/\1/p' "$pkg_cmake" | head -n1)
+  fi
+  if [ -n "$target" ]; then
     git -C "$d" cat-file -e "$target^{commit}" 2>/dev/null || git -C "$d" fetch --filter=tree:0 origin "$target"
+    target=$(git -C "$d" rev-parse --verify "$target^{commit}")
   else
     target=$(git -C "$d" rev-list -1 --first-parent --before="$cutoff" "$upstream")
   fi
@@ -53,9 +59,13 @@ for d in "$src"/*/; do
     echo "::error::pin-sources: $name has no commit at or before $cutoff"
     exit 1
   fi
+  prev=$(git -C "$d" rev-parse HEAD)
   git -C "$d" am --abort 2>/dev/null || true
   git -C "$d" update-ref "$upstream" "$target"
   git -C "$d" reset --hard -q "$target"
+  if [ "$prev" != "$target" ]; then
+    git -C "$d" clean -dfx -q
+  fi
   if [ -f "$d/.gitmodules" ] && [ -n "$(git -C "$d" submodule status --recursive 2>/dev/null)" ]; then
     git -C "$d" submodule update --init --recursive --force
   fi
