@@ -227,6 +227,8 @@ jobs:
           mpv_sha=$(grep '^mpv_commit=' BUILD-INFO.txt | cut -d= -f2 | cut -c1-10)
           # The run id keeps every rebuild on a new tag; an existing release is never replaced.
           tag="libmpv-lgpl-$(date -u +%Y-%m-%d)-${mpv_sha}-r${GITHUB_RUN_ID}"
+          tar -czf licenses.tar.gz licenses
+          rm -rf licenses
           sha256sum * > SHA256SUMS.txt
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "libmpv LGPL $tag" \
             --notes-file BUILD-INFO.txt ./*
