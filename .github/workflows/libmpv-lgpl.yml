@@ -139,6 +139,8 @@ jobs:
           bash ../scripts/check-licence.sh build64 "$dll" ../out "${{ inputs.accept_lgplv3 }}"
           (cd /tmp/check && find . -type f -print0 | sort -z | xargs -0 sha256sum) > ../out/PACKAGE-CONTENTS.sha256
           pacman -Q > ../out/host-packages.txt
+          dll_bytes=$(stat -c %s "$dll")
+          dll_mb=$(awk -v b="$dll_bytes" 'BEGIN { printf "%.2f", b / 1048576 }')
           {
             echo "built_at_utc=$(date -u +%FT%TZ)"
             echo "workflow_run=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
@@ -156,10 +158,21 @@ jobs:
             echo "mpv_commit=$(git -C src_packages/mpv rev-parse HEAD)"
             echo "ffmpeg_commit=$(git -C src_packages/ffmpeg rev-parse HEAD)"
             echo "package=$(basename "$pkg")"
+            echo "libmpv_dll_bytes=$dll_bytes"
+            echo "libmpv_dll_mb=$dll_mb"
             echo "libmpv_dll_sha256=$(sha256sum "$dll" | cut -d' ' -f1)"
             echo "package_sha256=$(sha256sum "$pkg" | cut -d' ' -f1)"
           } > ../out/BUILD-INFO.txt
           cat ../out/BUILD-INFO.txt
+          echo "libmpv-2.dll size: $dll_bytes bytes ($dll_mb MB)"
+          {
+            echo "### libmpv-2.dll size"
+            echo
+            echo "| File | Bytes | MB (MiB) |"
+            echo "| --- | ---: | ---: |"
+            echo "| libmpv-2.dll | $dll_bytes | $dll_mb |"
+            echo "| $(basename "$pkg") | $(stat -c %s "$pkg") | $(awk -v b="$(stat -c %s "$pkg")" 'BEGIN { printf "%.2f", b / 1048576 }') |"
+          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
       - name: Record and archive the corresponding sources
         shell: bash
