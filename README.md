@@ -23,8 +23,15 @@ Actions tab, **libmpv-lgpl**, **Run workflow**. Leave *sources_cutoff* blank unl
 `patch-after-lgpl/0004-slim-libmpv-for-kayrotv.patch` trims the DLL to what KayroTV uses (`MpvHost.cs` embeds mpv with `wid`, default `gpu-next` on d3d11, `config=no`, `load-scripts=no`, `ytdl=no`, `osc=no`). The job log, the step summary and `BUILD-INFO.txt` report the size of `libmpv-2.dll`.
 
 - **Removed:** the AV1 encoders (aom, SVT-AV1; dav1d still decodes), lame, libwebp, libvpx, opus, vorbis and speex (FFmpeg decodes VP8/VP9/Opus/Vorbis natively; speex is obsolete), vapoursynth, libjxl, libopenmpt, libmodplug, libaribcaption, libmysofa, libbs2b, libbluray, uavs3d, OpenAL, lcms2 in FFmpeg and mpv, OpenSSL and libssh. In mpv: Lua and JavaScript (luajit, mujs), SDL2 gamepad, libarchive, uchardet, vapoursynth. FFmpeg encoders are limited to `png` and `mjpeg` (screenshots), and muxers, devices and programs are disabled.
-- **Kept:** every FFmpeg decoder, demuxer, parser, bitstream filter, filter and protocol (restricting them is too risky), libplacebo/shaderc/spirv-cross/Vulkan headers, d3d11va, dxva2, NVDEC/CUVID and AMF headers, dav1d, libass with freetype, fribidi, harfbuzz and fontconfig, libxml2 (DASH), zimg, libsoxr, libpng and libjpeg, libva (left in as a precaution; its role in this mingw build was not verified) and libcurl.
+- **Kept:** every FFmpeg decoder, demuxer, parser, bitstream filter, filter and protocol (restricting them is too risky), libplacebo/shaderc/spirv-cross/Vulkan headers, d3d11va, dxva2, NVDEC and AMF headers, dav1d, libass with freetype, fribidi, harfbuzz and fontconfig, libxml2 (DASH), zimg, libsoxr, libpng and libjpeg and libcurl.
 - **TLS uses Windows SChannel**, in FFmpeg (`--enable-schannel`) and in curl, so OpenSSL is no longer built or linked. FFmpeg's `tls-ca-file` option no longer has any effect; the system certificate store is used. KayroTV sets `tls-ca-file` only in debug builds.
+
+`patch-after-lgpl/0005-drop-more-unused-parts-for-kayrotv.patch` makes a few more conservative cuts, all unused by `MpvHost.cs` (default vo, `hwdec` auto, d3d11va or no):
+
+- **Removed in 0005:** mpv sixel output (`-Dsixel=disabled`, libsixel) and subrandr (`-Dsubrandr=disabled`; libass still renders SRT, ASS and WebVTT); FFmpeg's libplacebo filter (`--enable-libplacebo`; mpv keeps its own libplacebo); FFmpeg CUDA filters (`--enable-cuda-llvm`) and the separate `*_cuvid` decoders (`--enable-cuvid`; NVDEC stays); FFmpeg VA-API (`--enable-vaapi`) and libva (Windows only).
+- **Still kept:** Vulkan, libplacebo in mpv, shaderc, spirv-cross, lcms2 (libplacebo), zimg, soxr, libxml2, libass and the fonts stack, dav1d, curl, and every FFmpeg decoder, demuxer, parser, filter and protocol.
+
+The full capability list every platform must keep (macOS, Linux, iPhone included) is in [docs/KAYROTV-MEDIA-PROFILE.md](docs/KAYROTV-MEDIA-PROFILE.md).
 
 After every build, test the channels before shipping: HLS, DASH (including ClearKey), MPEG-TS, HTTPS (several CDNs, TLS 1.2 and 1.3), RTMP, subtitles (SRT, ASS, WebVTT), screenshots, and the audio filters (acompressor, equalizer, dynaudnorm, bass, treble) and `deinterlace=auto`.
 
